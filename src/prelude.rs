@@ -2,7 +2,8 @@ pub use crate::{
 	ec::ErrorCorrectionLevel,
 	encode::{
 		EncodeMode,
-		test_encode_mode,
+		best_encode_mode,
+		test_encode_possible,
 	},
 	qr::{
 		QrMatrix,

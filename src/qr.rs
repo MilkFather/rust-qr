@@ -5,12 +5,16 @@ use crate::{
 	},
 	encode::{
 		EncodeMode,
-		test_encode_mode,
+		best_encode_mode,
+		test_encode_possible,
 		compile_pool,
 		encode_text
 	},
 	matrix::make_matrix,
-	version::smallest_version_by_encoding_and_eclevel,
+	version::{
+		smallest_version_by_encoding_and_eclevel,
+		test_version_possible,
+	},
 };
 
 type BitMatrix = ndarray::Array2<bool>;
@@ -22,25 +26,55 @@ pub struct QrMatrix {
 	pub matrix: BitMatrix,
 }
 
-pub fn make_qr(text: &String, preferred_encode_mode: Option<EncodeMode>, error_correction_level: ErrorCorrectionLevel, preferred_version: Option<u8>) -> Result<QrMatrix, String> {
-	let encode_mode = if preferred_encode_mode.is_none() { test_encode_mode(text) } else { Some(preferred_encode_mode.unwrap()) };
-	if encode_mode.is_none() { return Err(String::from("Cannot encode text")) }
-	let encode_mode = encode_mode.unwrap();
+pub fn make_qr(text: &str, preferred_encode_mode: Option<EncodeMode>, error_correction_level: ErrorCorrectionLevel, preferred_version: Option<u8>) -> Result<QrMatrix, &'static str> {
+	/* Test encode mode.
+	If preferred_encode_mode is specified, test to see if it is possible.
+	Otherwise, find a suitable encoding for it. */
+	let encode_mode: EncodeMode;
+	if let Some(pref_enc_mode) = preferred_encode_mode {
+		if !test_encode_possible(text, pref_enc_mode) {
+			return Err("Cannot encode with the specified encode mode");
+		} else {
+			encode_mode = pref_enc_mode;
+		}
+	} else {
+		let test_result = best_encode_mode(text);
+		if test_result.is_none() {
+			return Err("Cannot encode this text")
+		} else {
+			encode_mode = test_result.unwrap();
+		}
+	}
 
-	let version = if preferred_version.is_none() {
-		smallest_version_by_encoding_and_eclevel(text.len(), encode_mode, error_correction_level) 
-	} else { Some(preferred_version.unwrap()) };
-	if version.is_none() { return Err(String::from("Cannot find suitable version")) }
-	let version = version.unwrap();
-	if version > 40 || version < 1 { return Err(String::from("Impossible version")) }
+	/* Test QR code version.
+	If preferred_version is specified, test to see if it is possible.
+	Otherwise, find the minimal version suitable for the text and its encoding. */
+	let version: u8;
+	if let Some(pref_ver) = preferred_version {
+		if !test_version_possible(text.len(), encode_mode, error_correction_level, pref_ver) {
+			return Err("Cannot encode with the specified QR code version");
+		} else {
+			version = pref_ver;
+		}
+	} else { 
+		let test_result = smallest_version_by_encoding_and_eclevel(text.len(), encode_mode, error_correction_level);
+		if test_result.is_none() {
+			return Err("No suitable QR code version for this text")
+		} else {
+			version = test_result.unwrap();
+		}
+	}
 
-	let codepool = encode_text(text, encode_mode, error_correction_level, version);
-	if codepool.is_err() { return Err(codepool.unwrap_err()) }
-	let codepool = codepool.unwrap();
+	/* Generating bitstream and breaking them into different groups */
+	let codepool = unsafe {
+		encode_text(text, encode_mode, error_correction_level, version)
+	};
 	let ecpool = error_correction(&codepool, error_correction_level, version);
 	
-	/* Interleaving */
+	/* Interleaving groups into a single bitstream */
 	let data_box = compile_pool(&codepool, &ecpool, error_correction_level, version);
+
+	/* Writing the bitstream into the QR code matrix */
 	let matrix: BitMatrix = make_matrix(&data_box, error_correction_level, version);
 
 	Ok(QrMatrix{version, encode_mode, error_correction_level, matrix})

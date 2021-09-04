@@ -1,5 +1,11 @@
 use bitvec::prelude::*;
-use ndarray::{parallel::prelude::*, Zip, prelude::*};
+use ndarray::prelude::*;
+
+#[cfg(feature = "rayon")]
+use ndarray::{
+	Zip,
+	parallel::prelude::*
+}; 
 
 use crate::ec::ErrorCorrectionLevel;
 
@@ -38,19 +44,36 @@ fn mat_penality_1(mat: &Array2<u8>) -> u32 {
 		}
 		accu_score as u32
 	};
-	mat.axis_iter(Axis(0)).into_par_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_par_iter().map(func).sum::<u32>()
+
+	#[cfg(feature = "rayon")]
+	{
+		mat.axis_iter(Axis(0)).into_par_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_par_iter().map(func).sum::<u32>()
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		mat.axis_iter(Axis(0)).into_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_iter().map(func).sum::<u32>()
+	}
 }
 
 fn mat_penality_2(mat: &Array2<u8>) -> u32 {
 	let matsize = mat.shape()[0];
-	Zip::indexed(mat.slice(s![0..matsize-1, 0..matsize-1])).into_par_iter().map(|((y, x), b)| {
+	let penality_func = |((y, x), b)| {
 		let clr = b % 2;
 		if mat[[y+1, x]] % 2 == clr && mat[[y, x+1]] % 2 == clr && mat[[y+1, x+1]] % 2 == clr {
 			return 3;
 		} else {
 			return 0;
 		}
-	}).sum::<u32>()
+	};
+
+	#[cfg(feature = "rayon")]
+	{
+		Zip::indexed(mat.slice(s![0..matsize-1, 0..matsize-1])).into_par_iter(penality_func).map().sum::<u32>()
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		mat.slice(s![0..matsize-1, 0..matsize-1]).indexed_iter().map(penality_func).sum::<u32>()
+	}
 }
 
 fn mat_penality_3(mat: &Array2<u8>) -> u32 {
@@ -65,7 +88,15 @@ fn mat_penality_3(mat: &Array2<u8>) -> u32 {
 		}
 		score
 	};
-	mat.axis_iter(Axis(0)).into_par_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_par_iter().map(func).sum::<u32>()
+
+	#[cfg(feature = "rayon")]
+	{
+		mat.axis_iter(Axis(0)).into_par_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_par_iter().map(func).sum::<u32>()
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		mat.axis_iter(Axis(0)).into_iter().map(func).sum::<u32>() + mat.axis_iter(Axis(1)).into_iter().map(func).sum::<u32>()
+	}
 }
 
 fn mat_penality_4(mat: &Array2<u8>) -> u32 {
@@ -83,37 +114,77 @@ fn mat_penality_4(mat: &Array2<u8>) -> u32 {
 }
 
 fn apply_mask_inplace(mat: &mut Array2<u8>, mask: u8) {
-	match mask {
-		0 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y + x) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		1 => { Zip::indexed(mat).par_for_each(|(y, _), b| {if y % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		2 => { Zip::indexed(mat).par_for_each(|(_, x), b| {if x % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		3 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y + x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		4 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y / 2) + (x / 3)) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		5 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y * x) % 2 + (y * x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		6 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y * x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		7 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y + x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
-		_ => panic!("Mask interal error")
+	#[cfg(feature = "rayon")]
+	{
+		match mask {
+			0 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y + x) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			1 => { Zip::indexed(mat).par_for_each(|(y, _), b| {if y % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			2 => { Zip::indexed(mat).par_for_each(|(_, x), b| {if x % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			3 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y + x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			4 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y / 2) + (x / 3)) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			5 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if (y * x) % 2 + (y * x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			6 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y * x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			7 => { Zip::indexed(mat).par_for_each(|(y, x), b| {if ((y + x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); 	},
+			_ => panic!("Mask interal error")
+		}
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		match mask {
+			0 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if (y + x) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			1 => { mat.indexed_iter_mut().for_each(|((y, _), b)| {if y % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			2 => { mat.indexed_iter_mut().for_each(|((_, x), b)| {if x % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			3 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if (y + x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			4 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if ((y / 2) + (x / 3)) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			5 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if (y * x) % 2 + (y * x) % 3 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			6 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if ((y * x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); },
+			7 => { mat.indexed_iter_mut().for_each(|((y, x), b)| {if ((y + x) % 2 + (y * x) % 3) % 2 == 0 {if *b == 3 { *b = 4; } else if *b == 4 { *b = 3; }}}); 	},
+			_ => panic!("Mask interal error")
+		}
 	}
 }
 
 fn select_mask(mat: &Array2<u8>, eclevel: ErrorCorrectionLevel, version: u8) -> u8 {
-	let mut mask_penality_vec = Vec::<u32>::new();
+	#[allow(unused_mut)]
+	let mut mask_penality_vec: Vec<u32>;
 	let penality_handle = [mat_penality_1, mat_penality_2, mat_penality_3, mat_penality_4];
-	(0_u8..=7_u8).into_par_iter().map(|mask_id| {
-		let mut test_mat = mat.clone();
-		apply_mask_inplace(&mut test_mat, mask_id);
-		let format_info = match eclevel {
-			ErrorCorrectionLevel::L => &FORMAT_INFO_BY_MASK_L[mask_id as usize],
-			ErrorCorrectionLevel::M => &FORMAT_INFO_BY_MASK_M[mask_id as usize],
-			ErrorCorrectionLevel::Q => &FORMAT_INFO_BY_MASK_Q[mask_id as usize],
-			ErrorCorrectionLevel::H => &FORMAT_INFO_BY_MASK_H[mask_id as usize]
-		};
-		fill_format_info(&mut test_mat, format_info);
-		if version >= 7 {
-			fill_version_info(&mut test_mat, &VERSION_INFO[version as usize - 7]);
-		}
-		penality_handle.into_par_iter().map(|handle| handle(&test_mat)).sum::<u32>()
-	}).collect_into_vec(&mut mask_penality_vec);
+	#[cfg(feature = "rayon")]
+	{
+		mask_penality_vec = Vec::<u32>::new();
+		(0_u8..=7_u8).into_par_iter().map(|mask_id| {
+			let mut test_mat = mat.clone();
+			apply_mask_inplace(&mut test_mat, mask_id);
+			let format_info = match eclevel {
+				ErrorCorrectionLevel::L => &FORMAT_INFO_BY_MASK_L[mask_id as usize],
+				ErrorCorrectionLevel::M => &FORMAT_INFO_BY_MASK_M[mask_id as usize],
+				ErrorCorrectionLevel::Q => &FORMAT_INFO_BY_MASK_Q[mask_id as usize],
+				ErrorCorrectionLevel::H => &FORMAT_INFO_BY_MASK_H[mask_id as usize]
+			};
+			fill_format_info(&mut test_mat, format_info);
+			if version >= 7 {
+				fill_version_info(&mut test_mat, &VERSION_INFO[version as usize - 7]);
+			}
+			penality_handle.into_par_iter().map(|handle| handle(&test_mat)).sum::<u32>()
+		}).collect_into_vec(&mut mask_penality_vec);
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		mask_penality_vec = (0_u8..=7_u8).into_iter().map(|mask_id| {
+			let mut test_mat = mat.clone();
+			apply_mask_inplace(&mut test_mat, mask_id);
+			let format_info = match eclevel {
+				ErrorCorrectionLevel::L => &FORMAT_INFO_BY_MASK_L[mask_id as usize],
+				ErrorCorrectionLevel::M => &FORMAT_INFO_BY_MASK_M[mask_id as usize],
+				ErrorCorrectionLevel::Q => &FORMAT_INFO_BY_MASK_Q[mask_id as usize],
+				ErrorCorrectionLevel::H => &FORMAT_INFO_BY_MASK_H[mask_id as usize]
+			};
+			fill_format_info(&mut test_mat, format_info);
+			if version >= 7 {
+				fill_version_info(&mut test_mat, &VERSION_INFO[version as usize - 7]);
+			}
+			penality_handle.iter().map(|handle| handle(&test_mat)).sum::<u32>()
+		}).collect();
+	}
 
 	let mut result_id = 0;
 	let mut min_pen = mask_penality_vec[result_id as usize];

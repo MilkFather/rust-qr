@@ -1,4 +1,5 @@
-use rayon::prelude::*;
+#[cfg(feaature = "rayon")]
+use rayon_::prelude::*;
 
 #[derive(Clone, Copy)]
 pub enum ErrorCorrectionLevel { L, M, Q, H }
@@ -120,10 +121,17 @@ pub fn get_eclength(eclevel: ErrorCorrectionLevel, version: u8) -> usize {
 }
 
 pub fn error_correction(codewords: &Vec<Vec<u8>>, eclevel: ErrorCorrectionLevel, version: u8) -> Vec<Vec<u8>> {
-	let mut ecpool: Vec<Vec<u8>> = Vec::new();
 	let gplength = get_eclength(eclevel, version);
-	codewords.par_iter().map(|cw_block| get_ec(cw_block, gplength)).collect_into_vec(&mut ecpool);
-	return ecpool;
+	#[cfg(feature = "rayon")]
+	{
+		let mut ecpool = Vec::new();
+		codewords.par_iter().map(|cw_block| get_ec(cw_block, gplength)).collect_into_vec(&mut ecpool);
+		ecpool
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		codewords.iter().map(|cw_block| get_ec(cw_block, gplength)).collect()
+	}
 }
 
 #[cfg(test)]

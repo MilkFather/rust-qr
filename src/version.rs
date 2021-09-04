@@ -64,37 +64,40 @@ pub fn smallest_version_by_encoding_and_eclevel(len: usize, encode: EncodeMode, 
 }
 
 pub fn test_version_possible(len: usize, encode: EncodeMode, eclevel: ErrorCorrectionLevel, ver: u8) -> bool {
-	match encode {
-		EncodeMode::Numeric => {
-			match eclevel {
-				ErrorCorrectionLevel::L => { len <= CAPACITY_BY_NUMERIC_L[ver as usize - 1] },
-				ErrorCorrectionLevel::M => { len <= CAPACITY_BY_NUMERIC_M[ver as usize - 1] },
-				ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_NUMERIC_Q[ver as usize - 1] },
-				ErrorCorrectionLevel::H => { len <= CAPACITY_BY_NUMERIC_H[ver as usize - 1] }
-			}
-		},
-		EncodeMode::Alphanumeric => {
-			match eclevel {
-				ErrorCorrectionLevel::L => { len <= CAPACITY_BY_ALPHANUMERIC_L[ver as usize - 1] },
-				ErrorCorrectionLevel::M => { len <= CAPACITY_BY_ALPHANUMERIC_M[ver as usize - 1] },
-				ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_ALPHANUMERIC_Q[ver as usize - 1] },
-				ErrorCorrectionLevel::H => { len <= CAPACITY_BY_ALPHANUMERIC_H[ver as usize - 1] }
-			}
-		},
-		EncodeMode::Byte => {
-			match eclevel {
-				ErrorCorrectionLevel::L => { len <= CAPACITY_BY_BYTE_L[ver as usize - 1] },
-				ErrorCorrectionLevel::M => { len <= CAPACITY_BY_BYTE_M[ver as usize - 1] },
-				ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_BYTE_Q[ver as usize - 1] },
-				ErrorCorrectionLevel::H => { len <= CAPACITY_BY_BYTE_H[ver as usize - 1] }
-			}
-		},
-		EncodeMode::Kanji => {
-			match eclevel {
-				ErrorCorrectionLevel::L => { len <= CAPACITY_BY_KANJI_L[ver as usize - 1] },
-				ErrorCorrectionLevel::M => { len <= CAPACITY_BY_KANJI_M[ver as usize - 1] },
-				ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_KANJI_Q[ver as usize - 1] },
-				ErrorCorrectionLevel::H => { len <= CAPACITY_BY_KANJI_H[ver as usize - 1] }
+	if ver < 1 || ver > 40 { false }
+	else { 
+		match encode {
+			EncodeMode::Numeric => {
+				match eclevel {
+					ErrorCorrectionLevel::L => { len <= CAPACITY_BY_NUMERIC_L[ver as usize - 1] },
+					ErrorCorrectionLevel::M => { len <= CAPACITY_BY_NUMERIC_M[ver as usize - 1] },
+					ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_NUMERIC_Q[ver as usize - 1] },
+					ErrorCorrectionLevel::H => { len <= CAPACITY_BY_NUMERIC_H[ver as usize - 1] }
+				}
+			},
+			EncodeMode::Alphanumeric => {
+				match eclevel {
+					ErrorCorrectionLevel::L => { len <= CAPACITY_BY_ALPHANUMERIC_L[ver as usize - 1] },
+					ErrorCorrectionLevel::M => { len <= CAPACITY_BY_ALPHANUMERIC_M[ver as usize - 1] },
+					ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_ALPHANUMERIC_Q[ver as usize - 1] },
+					ErrorCorrectionLevel::H => { len <= CAPACITY_BY_ALPHANUMERIC_H[ver as usize - 1] }
+				}
+			},
+			EncodeMode::Byte => {
+				match eclevel {
+					ErrorCorrectionLevel::L => { len <= CAPACITY_BY_BYTE_L[ver as usize - 1] },
+					ErrorCorrectionLevel::M => { len <= CAPACITY_BY_BYTE_M[ver as usize - 1] },
+					ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_BYTE_Q[ver as usize - 1] },
+					ErrorCorrectionLevel::H => { len <= CAPACITY_BY_BYTE_H[ver as usize - 1] }
+				}
+			},
+			EncodeMode::Kanji => {
+				match eclevel {
+					ErrorCorrectionLevel::L => { len <= CAPACITY_BY_KANJI_L[ver as usize - 1] },
+					ErrorCorrectionLevel::M => { len <= CAPACITY_BY_KANJI_M[ver as usize - 1] },
+					ErrorCorrectionLevel::Q => { len <= CAPACITY_BY_KANJI_Q[ver as usize - 1] },
+					ErrorCorrectionLevel::H => { len <= CAPACITY_BY_KANJI_H[ver as usize - 1] }
+				}
 			}
 		}
 	}

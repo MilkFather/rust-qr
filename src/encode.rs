@@ -2,11 +2,12 @@ use std::cmp::{min, max};
 
 use bitvec::prelude::*;
 use encoding_rs::{WINDOWS_1252, SHIFT_JIS};
-use rayon::prelude::*;
+
+#[cfg(feature = "rayon")]
+use rayon_::prelude::*;
 
 use crate::{
 	ec::{ErrorCorrectionLevel, get_eclength},
-	version::test_version_possible
 };
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -27,7 +28,16 @@ const NUM_OF_CODEWORDS_IN_BLOCKS_BY_VERSION_M: [(u8, u8); 40] = [ (16, 0), (28, 
 const NUM_OF_CODEWORDS_IN_BLOCKS_BY_VERSION_Q: [(u8, u8); 40] = [ (13, 0), (22, 0), (17, 0), (24, 0), (15, 16), (19, 0), (14, 15), (18, 19), (16, 17), (19, 20), (22, 23), (20, 21), (20, 21), (16, 17), (24, 25), (19, 20), (22, 23), (22, 23), (21, 22), (24, 25), (22, 23), (24, 25), (24, 25), (24, 25), (24, 25), (22, 23), (23, 24), (24, 25), (23, 24), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25), (24, 25) ];
 const NUM_OF_CODEWORDS_IN_BLOCKS_BY_VERSION_H: [(u8, u8); 40] = [ (9, 0), (16, 0), (13, 0), (9, 0), (11, 12), (15, 0), (13, 14), (14, 15), (12, 13), (15, 16), (12, 13), (14, 15), (11, 12), (12, 13), (12, 13), (15, 16), (14, 15), (14, 15), (13, 14), (15, 16), (16, 17), (13, 0), (15, 16), (16, 17), (15, 16), (16, 17), (15, 16), (15, 16), (15, 16), (15, 16), (15, 16), (15, 16), (15, 16), (16, 17), (15, 16), (15, 16), (15, 16), (15, 16), (15, 16), (15, 16) ];
 
-pub fn test_encode_mode(text: &String) -> Option<EncodeMode> {
+pub fn best_encode_mode(text: &str) -> Option<EncodeMode> {
+	// Test in order
+	if test_encode_possible(text, EncodeMode::Numeric) { return Some(EncodeMode::Numeric); }
+	else if test_encode_possible(text, EncodeMode::Alphanumeric) { return Some(EncodeMode::Alphanumeric); }
+	else if test_encode_possible(text, EncodeMode::Byte) { return Some(EncodeMode::Byte); }
+	else if test_encode_possible(text, EncodeMode::Kanji) { return Some(EncodeMode::Kanji); }
+	else { return None; }
+}
+
+pub fn test_encode_possible(text: &str, encoding: EncodeMode) -> bool {
 	let numeric_detect = |c: char| -> bool {
 		return c.is_digit(10);
 	};
@@ -35,27 +45,39 @@ pub fn test_encode_mode(text: &String) -> Option<EncodeMode> {
 		return ALPHANUMERIC_TABLE.iter().position(|&x| x == c).is_some();
 	};
 	let byte_detect = |c: char| -> bool {
-		let c_str = c.to_string();
-		let (encvec, _, err) = WINDOWS_1252.encode(c_str.as_str());
+		let mut buf = [0; 4];
+		let (encvec, _, err) = WINDOWS_1252.encode(char::encode_utf8(c, &mut buf));
 		return !err && !(0x80_u8 <= encvec[0] && encvec[0] <= 0x9f_u8) && !(encvec[0] <= 0x1f_u8);
 	};
 	let kanji_detect = |c: char| -> bool {
-		let c_str = c.to_string();
-		let (encvec, _enc, err) = SHIFT_JIS.encode(c_str.as_str());
+		let mut buf = [0; 4];
+		let (encvec, _enc, err) = SHIFT_JIS.encode(char::encode_utf8(c, &mut buf));
 		if err || encvec.len() != 2 { return false; }
 		let enc: u16 = ((encvec[0] as u16) << 8) | (encvec[1] as u16);
 		return ((0x8140_u16 <= enc) && (enc <= 0x9ffc_u16)) || ((0xe040_u16 <= enc) && (enc <= 0xebbf_u16));
 	};
 
-	// Test in order
-	if text.par_chars().map(numeric_detect).all(|x| x) { return Some(EncodeMode::Numeric); }
-	else if text.par_chars().map(alphanumeric_detect).all(|x| x) { return Some(EncodeMode::Alphanumeric); }
-	else if text.par_chars().map(byte_detect).all(|x| x) { return Some(EncodeMode::Byte); }
-	else if text.par_chars().map(kanji_detect).all(|x| x) { return Some(EncodeMode::Kanji); }
-	else { return None; }
+	#[cfg(feature = "rayon")]
+	{
+		match encoding {
+			EncodeMode::Numeric => text.par_chars().map(numeric_detect).all(|x| x),
+			EncodeMode::Alphanumeric => text.par_chars().map(alphanumeric_detect).all(|x| x),
+			EncodeMode::Byte => text.par_chars().map(byte_detect).all(|x| x),
+			EncodeMode::Kanji => text.par_chars().map(kanji_detect).all(|x| x)
+		}
+	}
+	#[cfg(not(feature = "rayon"))]
+	{
+		match encoding {
+			EncodeMode::Numeric => text.chars().map(numeric_detect).all(|x| x),
+			EncodeMode::Alphanumeric => text.chars().map(alphanumeric_detect).all(|x| x),
+			EncodeMode::Byte => text.chars().map(byte_detect).all(|x| x),
+			EncodeMode::Kanji => text.chars().map(kanji_detect).all(|x| x)
+		}
+	}
 }
 
-fn encode_numeric(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Result<usize, String> {
+unsafe fn encode_numeric(text: &str, bb: &mut BitBox<Msb0, u8>, offset: usize) -> usize {
 	let mut written: usize = 0;
 	let mut iter = text.chars();
 	let mut stored = 0;
@@ -63,9 +85,7 @@ fn encode_numeric(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Re
 	loop {
 		let t_dig = iter.next();
 		if t_dig.is_none() { break }
-		let t_dig = t_dig.unwrap().to_digit(10);
-		if t_dig.is_none() { return Err(String::from("Cannot encode in numeric mode")) }
-		let t_dig = t_dig.unwrap();
+		let t_dig = t_dig.unwrap().to_digit(10).unwrap();
 		stored = stored * 10 + t_dig;
 		stored_dig += 1;
 		if stored_dig >= 3 {
@@ -81,10 +101,10 @@ fn encode_numeric(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Re
 		else if stored < 100 { bb[offset + written..offset + written + 7].store_be(stored); written += 7; }
 		else { bb[offset + written..offset + written + 10].store_be(stored); written += 10; }
 	}
-	return Ok(written);
+	written
 }
 
-fn encode_alphanumeric(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Result<usize, String> {
+unsafe fn encode_alphanumeric(text: &str, bb: &mut BitBox<Msb0, u8>, offset: usize) -> usize {
 	let mut written: usize = 0;
 	let mut iter = text.chars();
 	loop {
@@ -93,58 +113,47 @@ fn encode_alphanumeric(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) 
 
 		if t_c1.is_none() { break }
 		else if t_c2.is_none() { 
-			let t_c1 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c1.unwrap());
-			if t_c1.is_none() { return Err(String::from("Cannot encode in alphanumeric mode")) }
-			bb[offset + written..offset + written + 6].store_be(t_c1.unwrap());
+			let t_c1 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c1.unwrap()).unwrap();
+			bb[offset + written..offset + written + 6].store_be(t_c1);
 			written += 6;
 			break;
 		} else {
-			let t_c1 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c1.unwrap());
-			let t_c2 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c2.unwrap());
-			if t_c1.is_none() || t_c2.is_none() { return Err(String::from("Cannot encode in alphanumeric mode")) }
-			bb[offset + written..offset + written + 11].store_be(t_c1.unwrap() * 45 + t_c2.unwrap());
+			let t_c1 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c1.unwrap()).unwrap();
+			let t_c2 = ALPHANUMERIC_TABLE.iter().position(|&x| x == t_c2.unwrap()).unwrap();
+			bb[offset + written..offset + written + 11].store_be(t_c1 * 45 + t_c2);
 			written += 11;
 		}
 	}
-	return Ok(written);
+	written
 }
 
-fn encode_byte(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Result<usize, String> {
+unsafe fn encode_byte(text: &str, bb: &mut BitBox<Msb0, u8>, offset: usize) -> usize {
 	let mut written: usize = 0;
-	let (encvec, _, err) = WINDOWS_1252.encode(text.as_str());
-	if err { return Err(String::from("Cannot encode in byte mode")) }
+	let (encvec, _, _) = WINDOWS_1252.encode(text);
 	for code in encvec.iter() {
-		if (0x80_u8 <= *code && *code <= 0x9f_u8) || (*code <= 0x1f_u8) {
-			return Err(String::from("Cannot encode in byte mode"))
-		} else {
-			bb[offset + written..offset + written + 8].store_be(*code);
-			written += 8;
-		}
+		bb[offset + written..offset + written + 8].store_be(*code);
+		written += 8;
 	}
-	return Ok(written);
+	written
 }
 
-fn encode_kanji(text: &String, bb: &mut BitBox<Msb0, u8>, offset: usize) -> Result<usize, String> {
+unsafe fn encode_kanji(text: &str, bb: &mut BitBox<Msb0, u8>, offset: usize) -> usize {
 	let mut written: usize = 0;
 	for c in text.chars() {
 		let c_str = c.to_string();
-		let (encvec, _enc, err) = SHIFT_JIS.encode(c_str.as_str());
-		if err { return Err(String::from("Cannot encode in kanji mode")) }
-		else if encvec.len() != 2 { return Err(String::from("Cannot encode in kanji mode")) }
-		else {
-			let mut enc: u16 = ((encvec[0] as u16) << 8) | (encvec[1] as u16);
-			if (0x8140_u16 <= enc) && (enc <= 0x9ffc_u16) { enc = enc - 0x8140_u16 }
-			else if (0xe040_u16 <= enc) && (enc <= 0xebbf_u16) { enc = enc - 0xc140_u16 }
-			else { return Err(String::from("Cannot encode in kanji mode")) }
-			let comp = ((enc & 0xff00) >> 8) * 0xc0_u16 + (enc & 0x00ff_u16);
-			bb[offset + written..offset + written + 13].store_be(comp);
-			written += 13;
-		}
+		let (encvec, _, _) = SHIFT_JIS.encode(c_str.as_str());
+		let mut enc: u16 = ((encvec[0] as u16) << 8) | (encvec[1] as u16);
+		if (0x8140_u16 <= enc) && (enc <= 0x9ffc_u16) { enc = enc - 0x8140_u16 }
+		else if (0xe040_u16 <= enc) && (enc <= 0xebbf_u16) { enc = enc - 0xc140_u16 }
+		else { panic!("Invalid codepoint while encoding kanji. Did you perform encoding check beforehand?") }
+		let comp = ((enc & 0xff00) >> 8) * 0xc0_u16 + (enc & 0x00ff_u16);
+		bb[offset + written..offset + written + 13].store_be(comp);
+		written += 13;
 	}
-	return Ok(written);
+	written
 }
 
-fn encode_textmode(bv: &mut BitBox<Msb0, u8>, encode_mode: &EncodeMode) {
+unsafe fn encode_textmode(bv: &mut BitBox<Msb0, u8>, encode_mode: EncodeMode) {
 	match encode_mode {
 		EncodeMode::Numeric => { bv[..4].store_be(0b_0001_u8) },
 		EncodeMode::Alphanumeric => { bv[..4].store_be(0b_0010_u8) },
@@ -171,20 +180,18 @@ fn get_block_and_codewords_count(eclevel: ErrorCorrectionLevel, version: u8) -> 
 	}
 }
 
-pub fn encode_text(text: &String, encode_mode: EncodeMode, eclevel: ErrorCorrectionLevel, version: u8) -> Result<Vec<Vec<u8>>, String> {
-	if !test_version_possible(text.len(), encode_mode, eclevel, version) { return Err(String::from("Cannot fit into version")) }
-
+pub unsafe fn encode_text(text: &str, encode_mode: EncodeMode, eclevel: ErrorCorrectionLevel, version: u8) -> Vec<Vec<u8>> {
 	let ((block_in_g1, block_in_g2), (codew_in_b1, codew_in_b2)) = get_block_and_codewords_count(eclevel, version);
 	let total_bits: usize = 8 * ((block_in_g1 as usize) * (codew_in_b1 as usize) + (block_in_g2 as usize) * (codew_in_b2 as usize));
 	let mut bv = bitbox![Msb0, u8; 0; total_bits as usize];
 	let mut idxtrack: usize = 0;
 
-	encode_textmode(&mut bv, &encode_mode);
+	encode_textmode(&mut bv, encode_mode);
 	idxtrack += 4;
 	bv[idxtrack..idxtrack + get_len_size(encode_mode, version)].store_be(text.chars().count() as u32);
 	idxtrack += get_len_size(encode_mode, version);
 
-	let txtresult = {
+	let encode_size = {
 		match encode_mode {
 			EncodeMode::Numeric => { encode_numeric(text, &mut bv, idxtrack) },
 			EncodeMode::Alphanumeric => { encode_alphanumeric(text, &mut bv, idxtrack) },
@@ -192,48 +199,44 @@ pub fn encode_text(text: &String, encode_mode: EncodeMode, eclevel: ErrorCorrect
 			EncodeMode::Kanji => { encode_kanji(text, &mut bv, idxtrack) }
 		}
 	};
-	match txtresult {
-		Err(s) => { return Err(s) }
-		Ok(s) => {
-			idxtrack += s;
-			bv[idxtrack..idxtrack + min(4, (total_bits as usize) - idxtrack)].store_be(0b_0000_u8);
-			idxtrack += min(4, total_bits - idxtrack);
 
-			if idxtrack % 8 != 0 {
-				bv[idxtrack..idxtrack + 8 - (idxtrack % 8)].store_be(0b_00000000_u8);
-				idxtrack += 8 - (idxtrack % 8);
-			}
-			while idxtrack + 1 < total_bits {
-				bv[idxtrack..idxtrack + 8].store_be(0b_11101100_u8);
-				idxtrack += 8;
-				if idxtrack + 1 < total_bits {
-					bv[idxtrack..idxtrack + 8].store_be(0b_00010001_u8);
-					idxtrack += 8;
-				}
-			}
+	idxtrack += encode_size;
+	bv[idxtrack..idxtrack + min(4, (total_bits as usize) - idxtrack)].store_be(0b_0000_u8);
+	idxtrack += min(4, total_bits - idxtrack);
 
-			let buf = bv.as_slice();
-			let mut result: Vec<Vec<u8>> = Vec::new();
-			let mut glb_idx: usize = 0;
-			for _ in 0..block_in_g1 {
-				let mut blockvec = Vec::<u8>::new();
-				for _ in 0..codew_in_b1 {
-					blockvec.push(buf[glb_idx]);
-					glb_idx += 1;
-				}
-				result.push(blockvec);
-			}
-			for _ in 0..block_in_g2 {
-				let mut blockvec = Vec::<u8>::new();
-				for _ in 0..codew_in_b2 {
-					blockvec.push(buf[glb_idx]);
-					glb_idx += 1;
-				}
-				result.push(blockvec);
-			}
-			return Ok(result);
+	if idxtrack % 8 != 0 {
+		bv[idxtrack..idxtrack + 8 - (idxtrack % 8)].store_be(0b_00000000_u8);
+		idxtrack += 8 - (idxtrack % 8);
+	}
+	while idxtrack + 1 < total_bits {
+		bv[idxtrack..idxtrack + 8].store_be(0b_11101100_u8);
+		idxtrack += 8;
+		if idxtrack + 1 < total_bits {
+			bv[idxtrack..idxtrack + 8].store_be(0b_00010001_u8);
+			idxtrack += 8;
 		}
 	}
+
+	let buf = bv.as_slice();
+	let mut result: Vec<Vec<u8>> = Vec::new();
+	let mut glb_idx: usize = 0;
+	for _ in 0..block_in_g1 {
+		let mut blockvec = Vec::<u8>::new();
+		for _ in 0..codew_in_b1 {
+			blockvec.push(buf[glb_idx]);
+			glb_idx += 1;
+		}
+		result.push(blockvec);
+	}
+	for _ in 0..block_in_g2 {
+		let mut blockvec = Vec::<u8>::new();
+		for _ in 0..codew_in_b2 {
+			blockvec.push(buf[glb_idx]);
+			glb_idx += 1;
+		}
+		result.push(blockvec);
+	}
+	result
 }
 
 pub fn compile_pool(codeword_pool: &Vec<Vec<u8>>, ec_pool: &Vec<Vec<u8>>, eclevel: ErrorCorrectionLevel, version: u8) -> BitBox<Msb0, u8> {
@@ -266,7 +269,7 @@ pub fn compile_pool(codeword_pool: &Vec<Vec<u8>>, ec_pool: &Vec<Vec<u8>>, ecleve
 		else if version <= 27 { 4 }
 		else if version <= 34 { 3 }
 		else if version <= 40 { 0 }
-		else { panic!("version internal error") }
+		else { panic!("Version internal error") }
 	};
 	bvec.reserve_exact(extra_bits);
 	for _ in 0..extra_bits {
@@ -280,7 +283,7 @@ pub fn compile_pool(codeword_pool: &Vec<Vec<u8>>, ec_pool: &Vec<Vec<u8>>, ecleve
 mod tests {
     use super::{
 		EncodeMode,
-		test_encode_mode,
+		best_encode_mode,
 	};
 	use crate::{
 		encode::encode_text,
@@ -289,23 +292,23 @@ mod tests {
 
 	#[test]
 	fn encode_mode_test() {
-		assert_eq!(Some(EncodeMode::Numeric), test_encode_mode(&String::from("8675309")));
-		assert_eq!(Some(EncodeMode::Alphanumeric), test_encode_mode(&String::from("HELLO WORLD")));
-		assert_eq!(Some(EncodeMode::Byte), test_encode_mode(&String::from("Hello, world!")));
-		assert_eq!(Some(EncodeMode::Kanji), test_encode_mode(&String::from("茗荷")));
-		assert_eq!(None, test_encode_mode(&String::from("茗荷12345")));
+		assert_eq!(Some(EncodeMode::Numeric), best_encode_mode("8675309"));
+		assert_eq!(Some(EncodeMode::Alphanumeric), best_encode_mode("HELLO WORLD"));
+		assert_eq!(Some(EncodeMode::Byte), best_encode_mode("Hello, world!"));
+		assert_eq!(Some(EncodeMode::Kanji), best_encode_mode("茗荷"));
+		assert_eq!(None, best_encode_mode("茗荷12345"));
 	}
 
 	#[test]
 	fn encode_alphanumeric_test() {
 		assert_eq!(
-			encode_text(&String::from("HELLO WORLD"), EncodeMode::Alphanumeric, ErrorCorrectionLevel::Q, 1).unwrap(), 
+			unsafe { encode_text("HELLO WORLD", EncodeMode::Alphanumeric, ErrorCorrectionLevel::Q, 1) }, 
 			vec![
 				vec![0b00100000, 0b01011011, 0b00001011, 0b01111000, 0b11010001, 0b01110010, 0b11011100, 0b01001101, 0b01000011, 0b01000000, 0b11101100, 0b00010001, 0b11101100]
 			]
 		);
 		assert_eq!(
-			encode_text(&String::from("HELLO WORLD"), EncodeMode::Alphanumeric, ErrorCorrectionLevel::M, 1).unwrap(), 
+			unsafe { encode_text("HELLO WORLD", EncodeMode::Alphanumeric, ErrorCorrectionLevel::M, 1) }, 
 			vec![
 				vec![32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236, 17, 236, 17]
 			]
@@ -315,7 +318,7 @@ mod tests {
 	#[test]
 	fn encode_kanji_test() {
 		assert_eq!(
-			encode_text(&String::from("茗荷"), EncodeMode::Kanji, ErrorCorrectionLevel::M, 1).unwrap(),
+			unsafe { encode_text("茗荷", EncodeMode::Kanji, ErrorCorrectionLevel::M, 1) },
 			vec![
 				vec![128, 45, 85, 26, 92, 0, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17]
 			]

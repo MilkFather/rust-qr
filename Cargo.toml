@@ -8,13 +8,14 @@ edition = "2018"
 [dependencies]
 bitvec = "^0.22"
 encoding_rs = "^0.8"
-ndarray = { version = "^0.15", features = ["rayon"] }
-rayon = "^1.5"
+ndarray = { version = "^0.15" }
+rayon_ = { package = "rayon", version = "^1.5", optional = true }
 image_ = { package = "image", version = "^0.23", optional = true }
 serde_ = { package = "serde", version = "^1.0", optional = true }
 serde_json = { version = "^1.0", optional = true }
 
 [features]
 image = ["image_"]
+rayon = ["rayon_", "ndarray/rayon"]
 serde = ["serde_"]
 json = ["serde", "serde_json"]
