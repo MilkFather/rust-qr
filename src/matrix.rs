@@ -68,7 +68,7 @@ fn mat_penality_2(mat: &Array2<u8>) -> u32 {
 
 	#[cfg(feature = "rayon")]
 	{
-		Zip::indexed(mat.slice(s![0..matsize-1, 0..matsize-1])).into_par_iter(penality_func).map().sum::<u32>()
+		Zip::indexed(mat.slice(s![0..matsize-1, 0..matsize-1])).into_par_iter().map(penality_func).sum::<u32>()
 	}
 	#[cfg(not(feature = "rayon"))]
 	{
