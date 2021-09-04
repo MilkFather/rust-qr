@@ -1,4 +1,4 @@
-#[cfg(feaature = "rayon")]
+#[cfg(feature = "rayon")]
 use rayon_::prelude::*;
 
 #[derive(Clone, Copy)]
