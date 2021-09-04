@@ -1,6 +1,8 @@
 #![cfg(feature = "serde")]
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+#[cfg(feature = "rayon")]
+use rayon_::iter::{IntoParallelIterator, ParallelIterator, IndexedParallelIterator};
 use serde_::ser::{Serialize, Serializer, SerializeStruct};
+use ndarray::{ArrayBase, Axis, ViewRepr, Dim};
 
 use crate::{
 	ec::ErrorCorrectionLevel,
@@ -11,15 +13,24 @@ use crate::{
 impl QrMatrix {
 
 	fn to_01_vec(&self) -> Vec<Vec<u8>> {
-		let mut v = Vec::new();
-		rayon::iter::IndexedParallelIterator::collect_into_vec(self.matrix.axis_iter(ndarray::Axis(0)).into_par_iter().map(|row| {
+		/* Not using parallel even if serde is on. Don't make calculation too fragmented */
+		let cvt_row = |row: ArrayBase<ViewRepr<&bool>, Dim<[usize; 1]>>| -> Vec<u8> {
 			let mut v2 = Vec::new();
 			for b in row.iter() {
 				if *b {v2.push(1)} else {v2.push(0)}
 			}
 			v2
-		}), &mut v);
-		v
+		};
+		#[cfg(feature = "rayon")]
+		{
+			let mut v = Vec::new();
+			IndexedParallelIterator::collect_into_vec(self.matrix.axis_iter(Axis(0)).into_par_iter().map(cvt_row), &mut v);
+			v
+		}
+		#[cfg(not(feature = "rayon"))]
+		{
+			self.matrix.axis_iter(Axis(0)).map(cvt_row).collect()
+		}
 	}
 
 }
