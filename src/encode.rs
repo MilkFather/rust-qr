@@ -245,7 +245,7 @@ pub fn compile_pool(codeword_pool: &Vec<Vec<u8>>, ec_pool: &Vec<Vec<u8>>, ecleve
 
 	for i in 0..max(codew_in_b1, codew_in_b2) {
 		for j in 0..block_in_g1+block_in_g2 {
-			if i as usize > codeword_pool[j as usize].len() {
+			if i as usize >= codeword_pool[j as usize].len() {
 				continue;
 			}
 			interleaved.push(codeword_pool[j as usize][i as usize]);
@@ -253,7 +253,7 @@ pub fn compile_pool(codeword_pool: &Vec<Vec<u8>>, ec_pool: &Vec<Vec<u8>>, ecleve
 	}
 	for i in 0..get_eclength(eclevel, version) {
 		for j in 0..block_in_g1+block_in_g2 {
-			if i > ec_pool[j as usize].len() {
+			if i >= ec_pool[j as usize].len() {
 				continue;
 			}
 			interleaved.push(ec_pool[j as usize][i]);
